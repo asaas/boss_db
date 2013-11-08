@@ -116,6 +116,18 @@ convert_value_to_type({D1, D2, D3} = Val, date) when is_integer(D1), is_integer(
     Val;
 convert_value_to_type({date, {D1, D2, D3} = Val}, date) when is_integer(D1), is_integer(D2), is_integer(D3) ->
     Val;
+
+%% for use MongoDB
+%% add Ohira, Shuji at 2013-09-10
+convert_value_to_type({D1, D2, D3} = Val, timestamp) when is_integer(D1), is_integer(D2), is_integer(D3) ->
+    Val;
+convert_value_to_type(undefined, timestamp) ->
+    undefined;
+convert_value_to_type({D1, D2, D3} = Val, datetime) when is_integer(D1), is_integer(D2), is_integer(D3) ->
+    calendar:now_to_local_time(Val);
+convert_value_to_type(undefined, datetime) ->
+    undefined;
+
 convert_value_to_type(<<"1">>, boolean) -> true;
 convert_value_to_type(<<"0">>, boolean) -> false;
 convert_value_to_type(<<"true">>, boolean) -> true;
@@ -127,4 +139,10 @@ convert_value_to_type("false", boolean) -> false;
 convert_value_to_type(1, boolean) -> true;
 convert_value_to_type(0, boolean) -> false;
 convert_value_to_type(true, boolean) -> true;
-convert_value_to_type(false, boolean) -> false.
+convert_value_to_type(false, boolean) -> false;
+
+%% Added by Amit Dhage 2013-10-11
+
+convert_value_to_type(undefined, integer) ->
+	undefined.
+%%
