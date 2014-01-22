@@ -91,6 +91,15 @@ convert_value_to_type(Val, float) when is_float(Val) ->
     Val;
 convert_value_to_type(Val, float) when is_integer(Val) -> 
     1.0 * Val;
+convert_value_to_type(Val, float) when is_list(Val) ->
+    list_to_float(Val);
+convert_value_to_type(Val, float) when is_binary(Val) ->
+	L = binary_to_list(Val),
+	try
+		list_to_float(L)
+    catch
+        error:badarg -> 1.0 * list_to_integer(L)
+    end;
 convert_value_to_type(Val, string) when is_integer(Val) ->
     integer_to_list(Val);
 convert_value_to_type(Val, string) when is_binary(Val) ->
