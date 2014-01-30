@@ -389,6 +389,8 @@ validate_record_types(Record) ->
                             true;
                         {{era, Era, year, Year, month, Month, day, Day}, jdate} when is_integer(Era), is_integer(Year), is_integer(Month), is_integer(Day) ->
                             true;
+                        {undefined, jdate} ->
+                            true;
                         {_Data, Type} ->
                             false
                     end,
