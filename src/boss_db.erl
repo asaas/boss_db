@@ -387,6 +387,8 @@ validate_record_types(Record) ->
                             true;
                         {Data, atom} when is_atom(Data) ->
                             true;
+                        {{era, Era, year, Year, month, Month, day, Day}, jdate} when is_integer(Era), is_integer(Year), is_integer(Month), is_integer(Day) ->
+                            true;
                         {_Data, Type} ->
                             false
                     end,
@@ -417,6 +419,8 @@ data_type(_, _Val) when is_binary(_Val) ->
     "binary";
 data_type(_, _Val) when is_integer(_Val) ->
     "integer";
+data_type(_, {era, Era, year, Year, month, Month, day, Day}) when is_integer(Era), is_integer(Year), is_integer(Month), is_integer(Day) ->
+    "jdate";
 data_type(_, _Val) when is_tuple(_Val) ->
     "datetime";
 data_type(_, _Val) when is_boolean(_Val) ->

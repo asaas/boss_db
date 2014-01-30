@@ -139,6 +139,10 @@ convert_value_to_type({D1, D2, D3} = Val, datetime) when is_integer(D1), is_inte
     calendar:now_to_local_time(Val);
 convert_value_to_type(undefined, datetime) ->
     undefined;
+convert_value_to_type(undefined, jdate) ->
+    undefined;
+convert_value_to_type({era, Era, year, Year, month, Month, day, Day} = Val, jdate) when is_integer(Era), is_integer(Year), is_integer(Month), is_integer(Day) ->
+    Val;
 
 convert_value_to_type(<<"1">>, boolean) -> true;
 convert_value_to_type(<<"0">>, boolean) -> false;
