@@ -239,7 +239,7 @@ activate_record(Record, Metadata, Type) ->
                         undefined -> undefined;
                         {datetime, DateTime} -> boss_record_lib:convert_value_to_type(DateTime, AttrType);
                         Val -> 
-                            boss_sql_lib:convert_possible_foreign_key(RetypedForeignKeys, Type, Key, Val, AttrType, DBColumn)
+                            boss_sql_lib:convert_possible_foreign_key(RetypedForeignKeys, Type, Key, Val, AttrType)
                     end
             end, boss_record_lib:attribute_names(Type))).
 
@@ -418,7 +418,7 @@ pack_datetime(DateTime) ->
 pack_date(Date) ->
     "'" ++ erlydtl_filters:date(Date, "Y-m-d") ++ "'".
 
-pack_now(Now) -> pack_datetime(calendar:now_to_datetime(Now)).
+%pack_now(Now) -> pack_datetime(calendar:now_to_datetime(Now)).
 
 pack_value(null) ->
 	"null";
