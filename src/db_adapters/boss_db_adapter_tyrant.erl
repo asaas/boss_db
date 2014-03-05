@@ -14,7 +14,8 @@ stop() ->
 init(Options) ->
     Host = proplists:get_value(db_host, Options, "localhost"),
     Port = proplists:get_value(db_port, Options, 1978),
-    PrincipeOptions = [{hostname, Host}, {port, Port}],
+    DBConfigure = proplists:get_value(db_configure, Options, []),
+    PrincipeOptions = [{hostname, Host}, {port, Port} | DBConfigure],
     principe:connect(PrincipeOptions).
 
 terminate(Conn) ->
@@ -103,8 +104,6 @@ pack_record(RecordWithId, Type) ->
         end, RecordWithId:attribute_names()),
     [{attribute_to_colname('_type'), list_to_binary(atom_to_list(Type))}|Columns].
 
-infer_type_from_id(Id) when is_binary(Id) ->
-    infer_type_from_id(binary_to_list(Id));
 infer_type_from_id(Id) when is_list(Id) ->
     list_to_atom(hd(string:tokens(Id, "-"))).
 

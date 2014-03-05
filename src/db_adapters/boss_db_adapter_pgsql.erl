@@ -4,7 +4,12 @@
 -export([count/3, counter/2, incr/3, delete/2, save_record/2]).
 -export([push/2, pop/2, dump/1, execute/2, execute/3, transaction/2, create_table/3, table_exists/2]).
 -export([get_migrations_table/1, migration_done/3]).
-
+-compile(export_all).
+%-type date_time() ::{{1970..3000,calendar:month(),calne},{pos_integer(),pos_integer(),pos_integer()|float()}}.
+-type date_time() :: calendar:datetime1970().
+-type sql_param_value() :: string()|number()|binary()|boolean().
+-export_type([sql_param_value/0]).
+-compile(export_all).
 start(_) ->
     ok.
 
@@ -12,13 +17,14 @@ stop() ->
     ok.
 
 init(Options) ->
-    DBHost = proplists:get_value(db_host, Options, "localhost"),
-    DBPort = proplists:get_value(db_port, Options, 5432),
-    DBUsername = proplists:get_value(db_username, Options, "guest"),
-    DBPassword = proplists:get_value(db_password, Options, ""),
-    DBDatabase = proplists:get_value(db_database, Options, "test"),
+    DBHost      = proplists:get_value(db_host, Options, "localhost"),
+    DBPort      = proplists:get_value(db_port, Options, 5432),
+    DBUsername  = proplists:get_value(db_username, Options, "guest"),
+    DBPassword  = proplists:get_value(db_password, Options, ""),
+    DBDatabase  = proplists:get_value(db_database, Options, "test"),
+    DBConfigure = proplists:get_value(db_configure, Options, []),
     pgsql:connect(DBHost, DBUsername, DBPassword, 
-        [{port, DBPort}, {database, DBDatabase}]).
+        [{port, DBPort}, {database, DBDatabase} | DBConfigure]).
 
 terminate(Conn) ->
     pgsql:close(Conn).
@@ -38,9 +44,12 @@ find(Conn, Id) when is_list(Id) ->
             {error, Reason}
     end.
 
-find(Conn, Type, Conditions, Max, Skip, Sort, SortOrder) when is_atom(Type), is_list(Conditions), 
-                                                              is_integer(Max) orelse Max =:= all, is_integer(Skip), 
-                                                              is_atom(Sort), is_atom(SortOrder) ->
+find(Conn, Type, Conditions, Max, Skip, Sort, SortOrder) when is_atom(Type), 
+							      is_list(Conditions), 
+                                                              is_integer(Max) orelse Max =:= all, 
+							      is_integer(Skip), 
+                                                              is_atom(Sort), 
+							      is_atom(SortOrder) ->
     case boss_record_lib:ensure_loaded(Type) of
         true ->
             Query = build_select_query(Type, Conditions, Max, Skip, Sort, SortOrder),
@@ -59,7 +68,8 @@ find(Conn, Type, Conditions, Max, Skip, Sort, SortOrder) when is_atom(Type), is_
                 {error, Reason} ->
                     {error, Reason}
             end;
-        false -> {error, {module_not_loaded, Type}}
+        false -> 
+	    {error, {module_not_loaded, Type}}
     end.
 
 count(Conn, Type, Conditions) ->
@@ -101,12 +111,14 @@ delete(Conn, Id) when is_list(Id) ->
     end.
 
 save_record(Conn, Record) when is_tuple(Record) ->
-    case Record:id() of
+    RecordId = Record:id(),
+    lager:notice("Saving Record ~p~n", [Record]),
+    case RecordId of
         id ->
-            Record1 = maybe_populate_id_value(Record),
-            Type = element(1, Record1),
-            {Query,Params} = build_insert_query(Record1),
-            Res = pgsql:equery(Conn, Query, Params),
+            Record1		= maybe_populate_id_value(Record),
+            Type		= element(1, Record1),
+            {Query,Params}	= build_insert_query(Record1),
+	    Res			= pgsql:equery(Conn, Query, Params),
             case Res of
                 {ok, _, _, [{Id}]} ->
                     {ok, Record1:set(id, lists:concat([Type, "-", id_value_to_string(Id)]))};
@@ -116,7 +128,7 @@ save_record(Conn, Record) when is_tuple(Record) ->
             {Query,Params} = build_update_query(Record),
             Res = pgsql:equery(Conn, Query, Params),
             case Res of
-                {ok, _} -> {ok, Record};
+                {ok, _}         -> {ok, Record};
                 {error, Reason} -> {error, Reason}
             end
     end.
@@ -170,23 +182,34 @@ migration_done(Conn, Tag, down) ->
     end.
 
 % internal
-
-id_value_to_string(Id) when is_atom(Id) -> atom_to_list(Id);
+-spec(id_value_to_string(atom()|integer()|binary()|string() ) -> string()).
+id_value_to_string(Id) when is_atom(Id)    -> atom_to_list(Id);
 id_value_to_string(Id) when is_integer(Id) -> integer_to_list(Id);
-id_value_to_string(Id) when is_binary(Id) -> binary_to_list(Id);
+id_value_to_string(Id) when is_binary(Id)  -> binary_to_list(Id);
 id_value_to_string(Id) -> Id.
 
+
 maybe_populate_id_value(Record) ->
-    case boss_sql_lib:keytype(Record) of 
-        uuid -> Record:set(id, uuid:to_string(uuid:uuid4()));
-        _ -> Record
-end.
+    KeyType  = boss_sql_lib:keytype(Record),
+    maybe_populate_id_value(Record, KeyType).
+
+-type keytype() ::uuid|id.
+-spec(maybe_populate_id_value(tuple(), uuid|id) -> tuple()).
+maybe_populate_id_value(Record, uuid) ->    
+    Type = element(1, Record),
+    Record:set(id, lists:concat([Type, "-", uuid:to_string(uuid:uuid4())]));
+maybe_populate_id_value(Record, id) ->
+    Record;
+maybe_populate_id_value(Record, serial) ->
+    Record.
+
+
 
 activate_record(Record, Metadata, Type) ->
-    AttributeTypes = boss_record_lib:attribute_types(Type),
-    AttributeColumns = boss_record_lib:database_columns(Type),
+    AttributeTypes	= boss_record_lib:attribute_types(Type),
+    AttributeColumns	= boss_record_lib:database_columns(Type),
 
-    RetypedForeignKeys = boss_sql_lib:get_retyped_foreign_keys(Type),
+    RetypedForeignKeys	= boss_sql_lib:get_retyped_foreign_keys(Type),
 				  
     apply(Type, new, lists:map(fun
                 (id) ->
@@ -201,7 +224,7 @@ activate_record(Record, Metadata, Type) ->
                         undefined -> undefined;
                         null -> undefined;
                         Val -> 
-                            boss_sql_lib:convert_possible_foreign_key(RetypedForeignKeys, Type, Key, Val, AttrType, DBColumn)
+                            boss_sql_lib:convert_possible_foreign_key(RetypedForeignKeys, Type, Key, Val, AttrType)
                     end
             end, boss_record_lib:attribute_names(Type))).
 
@@ -216,42 +239,68 @@ keyindex(Key, N, [Tuple|Rest], Index) ->
         _ -> keyindex(Key, N, Rest, Index + 1)
     end.
 
+-spec(sort_order_sql(descending|ascending) -> string()).
 sort_order_sql(descending) ->
     "DESC";
 sort_order_sql(ascending) ->
     "ASC".
 
 build_insert_query(Record) ->
-    Type = element(1, Record),
-    TableName = boss_record_lib:database_table(Type),
-    AttributeColumns = Record:database_columns(),
-    {Attributes, Values} = lists:foldl(fun
-            ({_, undefined}, Acc) -> Acc;
-            ({'id', 'id'}, Acc) -> Acc;
-            ({'id', V}, {Attrs, Vals}) -> 
-                DBColumn = proplists:get_value('id', AttributeColumns),
-                {_, _, _, TableId} = boss_sql_lib:infer_type_from_id(V),
-                {[DBColumn|Attrs], [TableId|Vals]};
-            ({A, V}, {Attrs, Vals}) ->
-                DBColumn = proplists:get_value(A, AttributeColumns),
-                Value = case boss_sql_lib:is_foreign_key(Type, A) of
-                    true ->
-                        {_, _, _, ForeignId} = boss_sql_lib:infer_type_from_id(V),
-                        ForeignId;
-                    false ->
-                        V
-                end,
-                {[DBColumn|Attrs], [Value|Vals]}
-        end, {[], []}, Record:attributes()),
-    TempList=lists:seq(1,length(Attributes)),
-    Params= lists:map(fun(E)->"$"++integer_to_list(E) end,TempList),
-    {["INSERT INTO ", TableName, " (", 
-        string:join(Attributes, ", "),
-        ") values (",
-        string:join(Params, ", "),
-        ")",
-        " RETURNING id"
-    ],Values}.
+    Type			= element(1, Record),
+    TableName			= boss_record_lib:database_table(Type),
+
+    {Attributes, Values}	= make_insert_attributes(Record, Type),
+    TempList			= lists:seq(1,length(Attributes)),
+    Params			= lists:map(fun(E)->"$" ++ integer_to_list(E) end,TempList),
+    build_insert_sql(TableName, Attributes, Values, Params).
+
+
+-spec(build_insert_sql(nonempty_string(), 
+		       [nonempty_string(),...], 
+		       [sql_param_value(),...], 
+		       [nonempty_string(),...]) ->
+	     {iolist(), [sql_param_value()]}).
+build_insert_sql(TableName, Attributes, Values, Params) ->
+    {["INSERT INTO ", TableName, " (",
+      string:join(Attributes, ", "),
+      ") values (",
+      string:join(Params, ", "),
+      ")",
+      " RETURNING id"
+     ],Values}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%TODO: Test this
+%% Two lists should be the same length
+
+make_insert_attributes(Record, Type) ->
+    AttributeColumns		= Record:database_columns(),
+    lists:foldl(fun
+		    ({_, undefined}, Acc) -> Acc;
+		    ({'id', 'id'}, Acc)   -> Acc;
+		    ({'id', V}, {Attrs, Vals}) ->
+			DBColumn		= proplists:get_value('id', AttributeColumns),
+			{_, _, _, TableId}	= boss_sql_lib:infer_type_from_id(V),
+			{[DBColumn|Attrs], [TableId|Vals]};
+		    ({A, V}, {Attrs, Vals}) ->
+			DBColumn		= proplists:get_value(A, AttributeColumns),
+			Value                   = make_value(Type, A, V),
+			{[DBColumn|Attrs], 
+			 [Value|Vals]}
+                end, {[], []}, Record:attributes()).
+
+
+
+
+%TODO: Test this
+make_value(Type, A, V) ->
+    case boss_sql_lib:is_foreign_key(Type, A) of
+	true ->
+	    {_, _, _, ForeignId} = boss_sql_lib:infer_type_from_id(V),
+	    ForeignId;
+	false ->
+	    V
+    end.
 
 build_update_query(Record) ->
     {Type, TableName, IdColumn, Id} = boss_sql_lib:infer_type_from_id(Record:id()),
@@ -264,6 +313,8 @@ build_update_query(Record) ->
                     {true, true} ->
                         {_, _, _, ForeignId} = boss_sql_lib:infer_type_from_id(V),
                         ForeignId;
+                    {_, false} ->
+                        null;
                     _ ->
                         V
                 end,
@@ -377,15 +428,21 @@ escape_sql1([$'|Rest], Acc) ->
 escape_sql1([C|Rest], Acc) ->
     escape_sql1(Rest, [C|Acc]).
 
-pack_datetime(undefined) ->
-    "null";
+
+-spec(pack_datetime(date_time()) -> string()|iolist()).
 pack_datetime({Date, {Y, M, S}}) when is_float(S) ->
     pack_datetime({Date, {Y, M, erlang:round(S)}});
 pack_datetime(DateTime) ->
-    "TIMESTAMP '" ++ erlydtl_filters:date(DateTime, "c") ++ "'".
+    "TIMESTAMP " ++dh_date:format("'Y-m-dTH:i:s'",DateTime).
+    
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 
 pack_now(Now) -> pack_datetime(calendar:now_to_datetime(Now)).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+-spec(pack_value([byte()]|undefined|binary()|boolean()|number()|date_time()) -> string()|iolist()).
 pack_value(undefined) ->
     "null";
 pack_value(V) when is_binary(V) ->
@@ -405,6 +462,7 @@ pack_value(true) ->
 pack_value(false) ->
     "FALSE".
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 table_exists(Conn, TableName) when is_atom(TableName) ->
     Res = pgsql:squery(Conn, ["SELECT COUNT(tablename) FROM PG_TABLES WHERE SCHEMANAME='public' AND TABLENAME = '", atom_to_list(TableName), "'"]),
     case Res of
@@ -431,6 +489,8 @@ tabledefinition_to_sql(TableDefinition) ->
 	   column_options_to_sql(Options) ||
 	  {ColumnName, ColumnType, Options} <- TableDefinition], ", ").
 
+-spec(column_type_to_sql(auto_increment|string|integer|datetime) ->string()).
+
 column_type_to_sql(auto_increment) ->
     "SERIAL";
 column_type_to_sql(string) ->
@@ -440,9 +500,11 @@ column_type_to_sql(integer) ->
 column_type_to_sql(datetime) ->
     "TIMESTAMP".
 
+-spec(column_options_to_sql([{not_null| primary_key,any()}]) -> [string()]).
 column_options_to_sql(Options) ->
-    [option_to_sql({Option, Args}) || {Option, Args} <- proplists:unfold(Options)].
+    [option_to_sql({Option, Args}) || {Option, Args= true} <- proplists:unfold(Options)].
 
+-spec(option_to_sql({not_null|primary_key, true}) -> string()).
 option_to_sql({not_null, true}) ->
     "NOT NULL";
 option_to_sql({primary_key, true}) ->

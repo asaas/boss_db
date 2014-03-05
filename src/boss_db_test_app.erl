@@ -4,6 +4,7 @@
 
 -export([start/2, stop/1, run_init/0, run_setup/0, run_tests/0]).
 
+-spec(start(_,_) -> no_return()).
 start(_Type, _StartArgs) ->
     run_init(),
     run_setup(),
@@ -45,14 +46,14 @@ run_setup() ->
       io:format("Running setup SQL...~n", []),
       lists:map(fun(Cmd) ->
                   RetVal = boss_db:execute(Cmd),
-                  io:format("Returned: ~p~n", [RetVal])
+                  lager:info("Returned: ~p~n", [RetVal])
       end, re:split(FileContents, ";"));
     {error, _Reason} ->
       ok
   end.
 
 run_tests() ->
-  io:format("~-60s", ["Root test"]),
+  lager:info("~-60s", ["Root test"]),
   ModelText = <<"Economists do it with models">>,
   do(
     fun() ->

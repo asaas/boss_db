@@ -4,7 +4,7 @@
 -export([count/3, counter/2, incr/3, delete/2, save_record/2]).
 -export([push/2, pop/2, dump/1, execute/2, transaction/2]).
 -export([get_migrations_table/1, migration_done/3]).
-
+-compile(export_all).
 start(_) ->
     ok.
 
@@ -12,13 +12,13 @@ stop() ->
     ok.
 
 init(Options) ->
-    DBHost = proplists:get_value(db_host, Options, "localhost"),
-    DBPort = proplists:get_value(db_port, Options, 3306),
-    DBUsername = proplists:get_value(db_username, Options, "guest"),
-    DBPassword = proplists:get_value(db_password, Options, ""),
-    DBDatabase = proplists:get_value(db_database, Options, "test"),
+    DBHost       = proplists:get_value(db_host,     Options, "localhost"),
+    DBPort       = proplists:get_value(db_port,     Options, 3306),
+    DBUsername   = proplists:get_value(db_username, Options, "guest"),
+    DBPassword   = proplists:get_value(db_password, Options, ""),
+    DBDatabase   = proplists:get_value(db_database, Options, "test"),
     DBIdentifier = proplists:get_value(db_shard_id, Options, boss_pool),
-    Encoding = utf8,
+    Encoding     = utf8,
     mysql_conn:start_link(DBHost, DBPort, DBUsername, DBPassword, DBDatabase, 
         fun(_, _, _, _) -> ok end, Encoding, DBIdentifier).
 
@@ -35,7 +35,7 @@ find(Pid, Id) when is_list(Id) ->
                 [Row] ->
                     Columns = mysql:get_result_field_info(MysqlRes),
                     case boss_record_lib:ensure_loaded(Type) of
-                        true -> activate_record(Row, Columns, Type);
+                        true  -> activate_record(Row, Columns, Type);
                         false -> {error, {module_not_loaded, Type}}
                     end
             end;
@@ -80,6 +80,15 @@ count(Pid, Type, Conditions) ->
             Count;
         {error, MysqlRes} ->
             {error, mysql:get_result_reason(MysqlRes)}
+    end.
+    
+table_exists(Pid, Type) ->
+    TableName = boss_record_lib:database_table(Type),
+    Res = fetch(Pid, ["SELECT 1 FROM ", TableName," LIMIT 1"]),
+    case Res of
+        {updated, _} ->
+            ok;
+        {error, MysqlRes} -> {error, mysql:get_result_reason(MysqlRes)}
     end.
 
 counter(Pid, Id) when is_list(Id) ->
@@ -239,7 +248,7 @@ activate_record(Record, Metadata, Type) ->
                         undefined -> undefined;
                         {datetime, DateTime} -> boss_record_lib:convert_value_to_type(DateTime, AttrType);
                         Val -> 
-                            boss_sql_lib:convert_possible_foreign_key(RetypedForeignKeys, Type, Key, Val, AttrType, DBColumn)
+                            boss_sql_lib:convert_possible_foreign_key(RetypedForeignKeys, Type, Key, Val, AttrType)
                     end
             end, boss_record_lib:attribute_names(Type))).
 
@@ -274,7 +283,7 @@ build_insert_query(Record) ->
                 {[DBColumn|Attrs], [pack_value(TableId)|Vals]};
             ({A, V}, {Attrs, Vals}) ->
                 DBColumn = proplists:get_value(A, AttributeColumns),
-                Value = case boss_sql_lib:is_foreign_key(Type, A) of
+                Value    = case boss_sql_lib:is_foreign_key(Type, A) of
                     true ->
                         {_, _, _, ForeignId} = boss_sql_lib:infer_type_from_id(V),
                         ForeignId;
@@ -284,11 +293,13 @@ build_insert_query(Record) ->
                 {[DBColumn|Attrs], [pack_value(Value)|Vals]}
         end, {[], []}, Record:attributes()),
     ["INSERT INTO ", TableName, " (", 
-        string:join(Attributes, ", "),
+        string:join(escape_attr(Attributes), ", "),
         ") values (",
         string:join(Values, ", "),
         ")"
     ].
+escape_attr(Attrs) ->
+    [["`", Attr, "`"] || Attr <- Attrs].
 
 build_update_query(Record) ->
     {Type, TableName, IdColumn, TableId} = boss_sql_lib:infer_type_from_id(Record:id()),
@@ -301,10 +312,12 @@ build_update_query(Record) ->
                     {true, true} ->
                         {_, _, _, ForeignId} = boss_sql_lib:infer_type_from_id(V),
                         ForeignId;
+                    {_, false} ->
+                        null;
                     _ ->
                         V
                 end,
-                [DBColumn ++ " = " ++ pack_value(Value)|Acc]
+                ["`"++DBColumn ++ "` = " ++ pack_value(Value)|Acc]
         end, [], Record:attributes()),
     ["UPDATE ", TableName, " SET ", string:join(Updates, ", "),
         " WHERE ", IdColumn, " = ", pack_value(TableId)].
@@ -395,7 +408,6 @@ pack_match_not(Key) ->
 
 pack_boolean_query(Values, Op) ->
     "('" ++ string:join(lists:map(fun(Val) -> Op ++ escape_sql(Val) end, Values), " ") ++ "' IN BOOLEAN MODE)".
-
 pack_set(Values) ->
     "(" ++ string:join(lists:map(fun pack_value/1, Values), ", ") ++ ")".
 
@@ -413,12 +425,13 @@ escape_sql1([C|Rest], Acc) ->
     escape_sql1(Rest, [C|Acc]).
 
 pack_datetime(DateTime) ->
-    "'" ++ erlydtl_filters:date(DateTime, "Y-m-d H:i:s") ++ "'".
+    dh_date:format("'Y-m-d H:i:s'",DateTime ).
 
 pack_date(Date) ->
-    "'" ++ erlydtl_filters:date(Date, "Y-m-d") ++ "'".
+    dh_date:format("'Y-m-d\TH:i:s'",{Date, {0,0,0}}).
 
-pack_now(Now) -> pack_datetime(calendar:now_to_datetime(Now)).
+
+%pack_now(Now) -> pack_datetime(calendar:now_to_datetime(Now)).
 
 pack_value(null) ->
 	"null";
@@ -427,7 +440,7 @@ pack_value(undefined) ->
 pack_value(V) when is_binary(V) ->
     pack_value(binary_to_list(V));
 pack_value(V) when is_list(V) ->
-    "'" ++ escape_sql(V) ++ "'";
+    mysql:encode(V);
 pack_value({_, _, _} = Val) ->
 	pack_date(Val);    
 pack_value({{_, _, _}, {_, _, _}} = Val) ->
@@ -442,5 +455,6 @@ pack_value(false) ->
     "FALSE".
 
 fetch(Pid, Query) ->
+    lager:info("Query ~s", [iolist_to_binary(Query)]),
     mysql_conn:fetch(Pid, [Query], self()).
 

@@ -30,7 +30,6 @@ find(_, Id) when is_list(Id) ->
         {atomic,[]} ->
             undefined;
         {atomic,[Record]} ->   % I dont like this - we should really be checking that we only got 1 record
-%            io:format("Record is ~p~n",[Record]),
             case boss_record_lib:ensure_loaded(Type) of
                 true ->
                     Record;
@@ -134,14 +133,12 @@ test_rec(Rec,{Key, 'matches', "*"++Value}) ->
     {ok, MP} = re:compile(Value, [caseless]),
     case re:run(apply(Rec,Key,[]), MP) of
         {match,_} -> true;
-        match -> true;
         _ -> false
     end;
 test_rec(Rec,{Key, 'matches', Value}) ->
     {ok, MP} = re:compile(Value),
     case re:run(apply(Rec,Key,[]), MP) of
         {match,_} -> true;
-        match -> true;
         _ -> false
     end;
 test_rec(Rec,{Key, 'not_matches', Value}) ->
@@ -177,10 +174,9 @@ incr(_, Id, Count) ->
 
 % -----
 delete(Conn, Id) when is_binary(Id) ->
-%io:format("==> Delete/1 Called with binary ~p~n",[Id]),
+
     delete(Conn, binary_to_list(Id));
 delete(_, Id) when is_list(Id) ->
-%io:format("==> Delete/1 Called with list ~p~n",[Id]),
     Type = infer_type_from_id(Id),
     Fun = fun () -> mnesia:delete({Type,Id}) end,
     case mnesia:transaction(Fun)  of
@@ -254,8 +250,6 @@ gen_uid(Tab) ->
     mnesia:dirty_update_counter('_ids_', Tab, 1).
 
 %-----
-infer_type_from_id(Id) when is_binary(Id) ->
-    infer_type_from_id(binary_to_list(Id));
 infer_type_from_id(Id) when is_list(Id) ->
     list_to_atom(hd(string:tokens(Id, "-"))).
 
