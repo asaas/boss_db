@@ -252,9 +252,10 @@ handle_info(stop, State) ->
     {stop, shutdown, State};
 
 handle_info({'EXIT', _From, _Reason}, State) when State#state.connection_state == connected ->
-    {ok, Tref} = setup_reconnect(State),
-    {noreply, State#state { connection_state = disconnected, connection_delay = State#state.connection_delay * 2,
-			    connection_retry_timer = Tref } };
+%    {ok, Tref} = setup_reconnect(State),
+%    {noreply, State#state { connection_state = disconnected, connection_delay = State#state.connection_delay * 2,
+%			    connection_retry_timer = Tref } };
+    {noreply, State#state { connection_state = connected} };
 
 handle_info({'EXIT', _From, _Reason}, State) ->
     {noreply, State#state { connection_state = disconnected } };
