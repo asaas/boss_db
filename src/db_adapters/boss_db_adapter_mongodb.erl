@@ -66,13 +66,17 @@ init(Options) ->
     end.
 
 make_write_connection(Options, ReadConnection) ->
-    case proplists:get_value(db_write_host, Options) of
-	undefined ->
-	    ReadConnection;
-	WHost ->
-	    WPort       = proplists:get_value(db_write_host_port, Options, 27017),
-	    {ok, WConn} = mongo:connect({WHost, WPort}),
-	    WConn
+    case proplists:get_value(db_replication_set, Options) of
+        undefined ->
+            ReadConnection;
+        ReplSet ->
+            RSConn = mongo:rs_connect(ReplSet),
+            case mongo_replset:primary(RSConn) of
+                {ok, Connection} ->
+                    {rsc_write_conn, RSConn, Connection};
+                Error = {error, _} ->
+                    Error
+            end
     end.
 
 -spec(make_write_connection(proplist(),read_mode()) -> error_m(mongo:connection())).
@@ -84,13 +88,13 @@ make_read_connection(Options, ReadMode) ->
 	    {ok, Conn} = mongo:connect({Host, Port}),
 	    Conn;
 	ReplSet ->
-	    RSConn        = mongo:rs_connect(ReplSet),
-	    case read_connect1(ReadMode, RSConn) of
-		{ok, RSConn1} ->
-		    RSConn1;
-		Error = {error,_} ->
-		    Error
-	    end
+        RSConn = mongo:rs_connect(ReplSet),
+        case read_connect1(ReadMode, RSConn) of
+            {ok, Connection} ->
+                {rsc_read_conn, RSConn, Connection};
+            Error = {error, _} ->
+                Error
+        end
     end.
 -spec(read_connect1(read_mode(), mongo:rs_connection()) ->
 	     error_m( mongo:connection())).
@@ -102,19 +106,83 @@ read_connect1(slave_ok, RSConn) ->
 
 terminate({_, _, Connection, _}) ->
     case element(1, Connection) of
-        connection    -> mongo:disconnect(Connection);
-        rs_connection -> mongo:rs_disconnect(Connection)
+        connection     -> mongo:disconnect(Connection);
+        rsc_read_conn  -> mongo:rs_disconnect(element(2, Connection));
+        rsc_write_conn -> mongo:rs_disconnect(element(2, Connection));
+        rs_connection  -> mongo:rs_disconnect(Connection);
+        error          -> ok
     end;
 
 terminate({_, _, Connection, _,_,_}) ->
     case element(1, Connection) of
-        connection -> mongo:disconnect(Connection);
-        rs_connection -> mongo:rs_disconnect(Connection)
+        connection     -> mongo:disconnect(Connection);
+        rsc_read_conn  -> mongo:rs_disconnect(element(2, Connection));
+        rsc_write_conn -> mongo:rs_disconnect(element(2, Connection));
+        rs_connection  -> mongo:rs_disconnect(Connection);
+        error          -> ok
     end.
 
 
+execute({WriteMode, ReadMode, {rsc_read_conn, RSConn, Connection}, Database}, Fun) ->
+    case mongo:do(WriteMode, ReadMode, Connection, Database, Fun) of
+        {failure, {connection_failure, _, closed}} ->
+            NewConnection = read_connect1(ReadMode, RSConn),
+            {reconnected_read, mongo:do(WriteMode, ReadMode, NewConnection, Database, Fun), {rsc_read_conn, RSConn, NewConnection}};
+        Res ->
+            Res
+    end;
+execute({WriteMode, ReadMode, {rsc_write_conn, RSConn, Connection}, Database}, Fun) ->
+    case mongo:do(WriteMode, ReadMode, Connection, Database, Fun) of
+        {failure, {connection_failure, _, closed}} ->
+            case mongo_replset:primary(RSConn) of
+                {ok, NewConnection} ->
+                    {reconnected_write, mongo:do(WriteMode, ReadMode, NewConnection, Database, Fun), {rsc_write_conn, RSConn, NewConnection}};
+                Error = {error, _} ->
+                    Error
+            end;
+        Res ->
+            Res
+    end;
 execute({WriteMode, ReadMode, Connection, Database}, Fun) ->
     mongo:do(WriteMode, ReadMode, Connection, Database, Fun) ;
+execute({WriteMode, ReadMode, {rsc_read_conn, RSConn, Connection}, Database, User, Password}, Fun) ->
+    AuthFun = fun() ->
+                  case mongo:auth(User,Password) of
+			          true ->
+			              Fun();
+			          _ ->
+			              lager:error("Mongo DB Login Error check username and password ~p:~p", [User,Password]),
+			              {error,bad_login}
+		          end
+	          end,
+    case mongo:do(WriteMode, ReadMode, Connection, Database, AuthFun) of
+        {failure, {connection_failure, _, closed}} ->
+            NewConnection = read_connect1(ReadMode, RSConn),
+            {reconnected_read, mongo:do(WriteMode, ReadMode, NewConnection, Database, AuthFun), {rsc_read_conn, RSConn, NewConnection}};
+        Res ->
+            Res
+    end;
+execute({WriteMode, ReadMode, {rsc_write_conn, RSConn, Connection}, Database, User, Password}, Fun) ->
+    AuthFun = fun() ->
+                  case mongo:auth(User,Password) of
+			          true ->
+			              Fun();
+			          _ ->
+			              lager:error("Mongo DB Login Error check username and password ~p:~p", [User,Password]),
+			              {error,bad_login}
+		          end
+	          end,
+    case mongo:do(WriteMode, ReadMode, Connection, Database, AuthFun) of
+        {failure, {connection_failure, _, closed}} ->
+            case mongo_replset:primary(RSConn) of
+                {ok, NewConnection} ->
+                    {reconnected_write, mongo:do(WriteMode, ReadMode, NewConnection, Database, AuthFun), {rsc_write_conn, RSConn, NewConnection}};
+                Error = {error, _} ->
+                    Error
+            end;
+        Res ->
+            Res
+    end;
 execute({WriteMode, ReadMode, Connection, Database, User, Password}, Fun) ->
     mongo:do(WriteMode, ReadMode, Connection, Database, 
 	     fun() ->
@@ -234,8 +302,12 @@ save_record(Conn, Record) when is_tuple(Record) ->
 			  execute_save_record(Conn, Record, Collection, DefinedId)
 		  end,
     case Res of
+        
         {ok, ok}			-> {ok, Record};
         {ok, Id}			-> {ok, Record:set(id, unpack_id(Type, Id))};
+        {reconnected_write, {ok, ok}, NewConnection} -> {reconnected_write, {ok, Record}, NewConnection};
+        {reconnected_write, {ok, Id}, NewConnection} -> {reconnected_write, {ok, Record:set(id, unpack_id(Type, Id))}, NewConnection};
+        {reconnected_write, {failure, Reason}, NewConnection} -> {reconnected_write, {error, Reason}, NewConnection};
         {failure, Reason}		-> {error, Reason}
         
     end.
