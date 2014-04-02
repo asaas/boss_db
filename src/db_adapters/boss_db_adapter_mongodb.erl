@@ -104,6 +104,7 @@ read_connect1(master, RSConn) ->
 read_connect1(slave_ok, RSConn) ->
      mongo_replset:secondary_ok(RSConn).
 
+
 terminate({_, _, Connection, _}) ->
     case element(1, Connection) of
         connection     -> mongo:disconnect(Connection);
@@ -127,7 +128,9 @@ execute({WriteMode, ReadMode, {rsc_read_conn, RSConn, Connection}, Database}, Fu
     case mongo:do(WriteMode, ReadMode, Connection, Database, Fun) of
         {failure, {connection_failure, _, closed}} ->
             NewConnection = read_connect1(ReadMode, RSConn),
-            {reconnected_read, mongo:do(WriteMode, ReadMode, NewConnection, Database, Fun), {rsc_read_conn, RSConn, NewConnection}};
+            {reconnected_read,
+             mongo:do(WriteMode, ReadMode, NewConnection, Database, Fun),
+             {WriteMode, ReadMode, {rsc_read_conn, RSConn, NewConnection}, Database}};
         Res ->
             Res
     end;
@@ -136,7 +139,9 @@ execute({WriteMode, ReadMode, {rsc_write_conn, RSConn, Connection}, Database}, F
         {failure, {connection_failure, _, closed}} ->
             case mongo_replset:primary(RSConn) of
                 {ok, NewConnection} ->
-                    {reconnected_write, mongo:do(WriteMode, ReadMode, NewConnection, Database, Fun), {rsc_write_conn, RSConn, NewConnection}};
+                    {reconnected_write,
+                     mongo:do(WriteMode, ReadMode, NewConnection, Database, Fun),
+                     {WriteMode, ReadMode, {rsc_write_conn, RSConn, NewConnection}, Database}};
                 Error = {error, _} ->
                     Error
             end;
@@ -158,7 +163,9 @@ execute({WriteMode, ReadMode, {rsc_read_conn, RSConn, Connection}, Database, Use
     case mongo:do(WriteMode, ReadMode, Connection, Database, AuthFun) of
         {failure, {connection_failure, _, closed}} ->
             NewConnection = read_connect1(ReadMode, RSConn),
-            {reconnected_read, mongo:do(WriteMode, ReadMode, NewConnection, Database, AuthFun), {rsc_read_conn, RSConn, NewConnection}};
+            {reconnected_read,
+             mongo:do(WriteMode, ReadMode, NewConnection, Database, AuthFun),
+             {WriteMode, ReadMode, {rsc_read_conn, RSConn, NewConnection}, Database, User, Password}};
         Res ->
             Res
     end;
@@ -176,7 +183,9 @@ execute({WriteMode, ReadMode, {rsc_write_conn, RSConn, Connection}, Database, Us
         {failure, {connection_failure, _, closed}} ->
             case mongo_replset:primary(RSConn) of
                 {ok, NewConnection} ->
-                    {reconnected_write, mongo:do(WriteMode, ReadMode, NewConnection, Database, AuthFun), {rsc_write_conn, RSConn, NewConnection}};
+                    {reconnected_write,
+                     mongo:do(WriteMode, ReadMode, NewConnection, Database, AuthFun),
+                     {WriteMode, ReadMode, {rsc_write_conn, RSConn, NewConnection}, Database, User, Password}};
                 Error = {error, _} ->
                     Error
             end;
