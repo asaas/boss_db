@@ -185,6 +185,7 @@ convert_value_to_type(undefined, jdate) ->
 convert_value_to_type({era, Era, year, Year, month, Month, day, Day} = Val, jdate) when is_integer(Era), is_integer(Year), is_integer(Month), is_integer(Day) ->
     Val;
 
+convert_value_to_type(undefined,   boolean) -> undefined;
 convert_value_to_type(<<"1">>,     boolean) -> true;
 convert_value_to_type(<<"0">>,     boolean) -> false;
 convert_value_to_type(<<"true">>,  boolean) -> true;
