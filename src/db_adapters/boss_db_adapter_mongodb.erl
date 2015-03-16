@@ -4,7 +4,7 @@
 -export([start/1, stop/0, init/1, terminate/1, find/2, find/7]).
 -export([count/3, counter/2, incr/2, incr/3, delete/2, save_record/2]).
 -export([execute/2, transaction/2]).
--export([push/2, pop/2]).
+-export([push/2, pop/2, dump/1]).
 -export([table_exists/2, get_migrations_table/1, migration_done/3]).
 
 -define(LOG(Name, Value), lager:debug("DEBUG: ~s: ~p~n", [Name, Value])).
@@ -66,17 +66,13 @@ init(Options) ->
     end.
 
 make_write_connection(Options, ReadConnection) ->
-    case proplists:get_value(db_replication_set, Options) of
-        undefined ->
-            ReadConnection;
-        ReplSet ->
-            RSConn = mongo:rs_connect(ReplSet),
-            case mongo_replset:primary(RSConn) of
-                {ok, Connection} ->
-                    {rsc_write_conn, RSConn, Connection};
-                Error = {error, _} ->
-                    Error
-            end
+    case proplists:get_value(db_write_host, Options) of
+	undefined ->
+	    ReadConnection;
+	WHost ->
+	    WPort       = proplists:get_value(db_write_host_port, Options, 27017),
+	    {ok, WConn} = mongo:connect({WHost, WPort}),
+	    WConn
     end.
 
 -spec(make_write_connection(proplist(),read_mode()) -> error_m(mongo:connection())).
@@ -88,13 +84,13 @@ make_read_connection(Options, ReadMode) ->
 	    {ok, Conn} = mongo:connect({Host, Port}),
 	    Conn;
 	ReplSet ->
-        RSConn = mongo:rs_connect(ReplSet),
-        case read_connect1(ReadMode, RSConn) of
-            {ok, Connection} ->
-                {rsc_read_conn, RSConn, Connection};
-            Error = {error, _} ->
-                Error
-        end
+	    RSConn        = mongo:rs_connect(ReplSet),
+	    case read_connect1(ReadMode, RSConn) of
+		{ok, RSConn1} ->
+		    RSConn1;
+		Error = {error,_} ->
+		    Error
+	    end
     end.
 -spec(read_connect1(read_mode(), mongo:rs_connection()) ->
 	     error_m( mongo:connection())).
@@ -104,94 +100,21 @@ read_connect1(master, RSConn) ->
 read_connect1(slave_ok, RSConn) ->
      mongo_replset:secondary_ok(RSConn).
 
-
 terminate({_, _, Connection, _}) ->
     case element(1, Connection) of
-        connection     -> mongo:disconnect(Connection);
-        rsc_read_conn  -> mongo:rs_disconnect(element(2, Connection));
-        rsc_write_conn -> mongo:rs_disconnect(element(2, Connection));
-        rs_connection  -> mongo:rs_disconnect(Connection);
-        error          -> ok
+        connection    -> mongo:disconnect(Connection);
+        rs_connection -> mongo:rs_disconnect(Connection)
     end;
 
 terminate({_, _, Connection, _,_,_}) ->
     case element(1, Connection) of
-        connection     -> mongo:disconnect(Connection);
-        rsc_read_conn  -> mongo:rs_disconnect(element(2, Connection));
-        rsc_write_conn -> mongo:rs_disconnect(element(2, Connection));
-        rs_connection  -> mongo:rs_disconnect(Connection);
-        error          -> ok
+        connection -> mongo:disconnect(Connection);
+        rs_connection -> mongo:rs_disconnect(Connection)
     end.
 
 
-execute({WriteMode, ReadMode, {rsc_read_conn, RSConn, Connection}, Database}, Fun) ->
-    case mongo:do(WriteMode, ReadMode, Connection, Database, Fun) of
-        {failure, {connection_failure, _, closed}} ->
-            NewConnection = read_connect1(ReadMode, RSConn),
-            {reconnected_read,
-             mongo:do(WriteMode, ReadMode, NewConnection, Database, Fun),
-             {WriteMode, ReadMode, {rsc_read_conn, RSConn, NewConnection}, Database}};
-        Res ->
-            Res
-    end;
-execute({WriteMode, ReadMode, {rsc_write_conn, RSConn, Connection}, Database}, Fun) ->
-    case mongo:do(WriteMode, ReadMode, Connection, Database, Fun) of
-        {failure, {connection_failure, _, closed}} ->
-            case mongo_replset:primary(RSConn) of
-                {ok, NewConnection} ->
-                    {reconnected_write,
-                     mongo:do(WriteMode, ReadMode, NewConnection, Database, Fun),
-                     {WriteMode, ReadMode, {rsc_write_conn, RSConn, NewConnection}, Database}};
-                Error = {error, _} ->
-                    Error
-            end;
-        Res ->
-            Res
-    end;
 execute({WriteMode, ReadMode, Connection, Database}, Fun) ->
     mongo:do(WriteMode, ReadMode, Connection, Database, Fun) ;
-execute({WriteMode, ReadMode, {rsc_read_conn, RSConn, Connection}, Database, User, Password}, Fun) ->
-    AuthFun = fun() ->
-                  case mongo:auth(User,Password) of
-			          true ->
-			              Fun();
-			          _ ->
-			              lager:error("Mongo DB Login Error check username and password ~p:~p", [User,Password]),
-			              {error,bad_login}
-		          end
-	          end,
-    case mongo:do(WriteMode, ReadMode, Connection, Database, AuthFun) of
-        {failure, {connection_failure, _, closed}} ->
-            NewConnection = read_connect1(ReadMode, RSConn),
-            {reconnected_read,
-             mongo:do(WriteMode, ReadMode, NewConnection, Database, AuthFun),
-             {WriteMode, ReadMode, {rsc_read_conn, RSConn, NewConnection}, Database, User, Password}};
-        Res ->
-            Res
-    end;
-execute({WriteMode, ReadMode, {rsc_write_conn, RSConn, Connection}, Database, User, Password}, Fun) ->
-    AuthFun = fun() ->
-                  case mongo:auth(User,Password) of
-			          true ->
-			              Fun();
-			          _ ->
-			              lager:error("Mongo DB Login Error check username and password ~p:~p", [User,Password]),
-			              {error,bad_login}
-		          end
-	          end,
-    case mongo:do(WriteMode, ReadMode, Connection, Database, AuthFun) of
-        {failure, {connection_failure, _, closed}} ->
-            case mongo_replset:primary(RSConn) of
-                {ok, NewConnection} ->
-                    {reconnected_write,
-                     mongo:do(WriteMode, ReadMode, NewConnection, Database, AuthFun),
-                     {WriteMode, ReadMode, {rsc_write_conn, RSConn, NewConnection}, Database, User, Password}};
-                Error = {error, _} ->
-                    Error
-            end;
-        Res ->
-            Res
-    end;
 execute({WriteMode, ReadMode, Connection, Database, User, Password}, Fun) ->
     mongo:do(WriteMode, ReadMode, Connection, Database, 
 	     fun() ->
@@ -311,12 +234,8 @@ save_record(Conn, Record) when is_tuple(Record) ->
 			  execute_save_record(Conn, Record, Collection, DefinedId)
 		  end,
     case Res of
-        
         {ok, ok}			-> {ok, Record};
         {ok, Id}			-> {ok, Record:set(id, unpack_id(Type, Id))};
-        {reconnected_write, {ok, ok}, NewConnection} -> {reconnected_write, {ok, Record}, NewConnection};
-        {reconnected_write, {ok, Id}, NewConnection} -> {reconnected_write, {ok, Record:set(id, unpack_id(Type, Id))}, NewConnection};
-        {reconnected_write, {failure, Reason}, NewConnection} -> {reconnected_write, {error, Reason}, NewConnection};
         {failure, Reason}		-> {error, Reason}
         
     end.
@@ -352,10 +271,11 @@ execute_save_record(Conn, Record, Collection) ->
 			  mongo:insert(Collection, Doc)
                   end).
 
-% These 2 functions are not part of the behaviour but are required for
+% These 3 functions are not part of the behaviour but are required for
 % tests to pass
 push(_Conn, _Depth) -> ok.
 pop(_Conn,  _Depth) -> ok.
+dump(_Conn) -> ok.
 
 % This is needed to support boss_db:migrate
 table_exists(_Conn, _TableName) -> ok.

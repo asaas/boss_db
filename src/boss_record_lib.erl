@@ -117,7 +117,7 @@ ensure_loaded(Module) ->
 convert_value_to_type(Val, undefined) ->
     Val;
 convert_value_to_type(undefined, integer) ->
-	undefined;
+    undefined;
 convert_value_to_type(Val, integer) when is_integer(Val) ->
     Val;
 convert_value_to_type(Val, integer) when is_list(Val) ->
@@ -171,7 +171,7 @@ convert_value_to_type({date, {D1, D2, D3} = Val}, date) when is_integer(D1), is_
     Val;
 
 %% for use MongoDB
-%% add Ohira, Shuji at 2013-09-10
+%% addde Laxmikant on 2015-03-16
 convert_value_to_type({D1, D2, D3} = Val, timestamp) when is_integer(D1), is_integer(D2), is_integer(D3) ->
     Val;
 convert_value_to_type(undefined, timestamp) ->
@@ -184,7 +184,6 @@ convert_value_to_type(undefined, jdate) ->
     undefined;
 convert_value_to_type({era, Era, year, Year, month, Month, day, Day} = Val, jdate) when is_integer(Era), is_integer(Year), is_integer(Month), is_integer(Day) ->
     Val;
-
 convert_value_to_type(undefined,   boolean) -> undefined;
 convert_value_to_type(<<"1">>,     boolean) -> true;
 convert_value_to_type(<<"0">>,     boolean) -> false;
