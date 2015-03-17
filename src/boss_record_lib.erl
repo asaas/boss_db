@@ -171,7 +171,7 @@ convert_value_to_type({date, {D1, D2, D3} = Val}, date) when is_integer(D1), is_
     Val;
 
 %% for use MongoDB
-%% addde Laxmikant on 2015-03-16
+%% added by Laxmikant on 2015-03-16
 convert_value_to_type({D1, D2, D3} = Val, timestamp) when is_integer(D1), is_integer(D2), is_integer(D3) ->
     Val;
 convert_value_to_type(undefined, timestamp) ->
