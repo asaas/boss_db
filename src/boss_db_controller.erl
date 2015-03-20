@@ -104,14 +104,16 @@ handle_call({find, Key}, From, #state{ cache_enable = true, cache_prefix = Prefi
     find_by_key(Key, From, Prefix, State, CacheResult);
 handle_call({find, Key}, _From, #state{ cache_enable = false } = State) ->
     {Adapter, Conn, _} = db_for_key(Key, State),
-    {reply, Adapter:find(Conn, Key), State};
+    %{reply, Adapter:find(Conn, Key), State};
+    process_adapter_call(Adapter:find(Conn, Key), State);
 
 handle_call({find, Type, Conditions, Max, Skip, Sort, SortOrder, Include} = Cmd, From, 
     #state{ cache_enable = true, cache_prefix = Prefix } = State) ->
     Key = {Type, Conditions, Max, Skip, Sort, SortOrder},
     case boss_cache:get(Prefix, Key) of
         undefined ->
-            Res = find_list(Type, Include, Cmd, From, Prefix, State, Key),
+%            Res = find_list(Type, Include, Cmd, From, Prefix, State, Key),
+	    {Res, NewState} = find_list(Type, Include, Cmd, From, Prefix, State, Key),
             {reply, Res, State};
         CachedValue ->
             boss_news:extend_watch(Key),
@@ -119,47 +121,58 @@ handle_call({find, Type, Conditions, Max, Skip, Sort, SortOrder, Include} = Cmd,
     end;
 handle_call({find, Type, Conditions, Max, Skip, Sort, SortOrder, _}, _From, #state{ cache_enable = false } = State) ->
     {Adapter, Conn, _} = db_for_type(Type, State),
-    {reply, Adapter:find(Conn, Type, Conditions, Max, Skip, Sort, SortOrder), State};
+%    {reply, Adapter:find(Conn, Type, Conditions, Max, Skip, Sort, SortOrder), State};
+     process_adapter_call(Adapter:find(Conn, Type, Conditions, Max, Skip, Sort, SortOrder), State);
 
 handle_call({find_by_sql, Type, Sql, Parameters}, _From, State) ->
     {Adapter, Conn, _} = db_for_type(Type, State),
-    {reply, Adapter:find_by_sql(Conn, Type, Sql, Parameters), State};
+   % {reply, Adapter:find_by_sql(Conn, Type, Sql, Parameters), State};
+    process_adapter_call(Adapter:find_by_sql(Conn, Type, Sql, Parameters), State);
 
 handle_call({get_migrations_table}, _From, #state{ cache_enable = false } = State) ->
     {Adapter, Conn} = {State#state.adapter, State#state.read_connection},
-    {reply, Adapter:get_migrations_table(Conn), State};
+   % {reply, Adapter:get_migrations_table(Conn), State};
+    process_adapter_call(Adapter:get_migrations_table(Conn), State);
 
 handle_call({migration_done, Tag, Direction}, _From, #state{ cache_enable = false } = State) ->
     {Adapter, Conn} = {State#state.adapter, State#state.write_connection},
-    {reply, Adapter:migration_done(Conn, Tag, Direction), State};
+%   {reply, Adapter:migration_done(Conn, Tag, Direction), State};
+    process_adapter_call(Adapter:migration_done(Conn, Tag, Direction), State);
 
 handle_call({count, Type}, _From, State) ->
     {Adapter, Conn, _} = db_for_type(Type, State),
-    {reply, Adapter:count(Conn, Type), State};
+%    {reply, Adapter:count(Conn, Type), State};
+     process_adapter_call(Adapter:count(Conn, Type), State);
 
 handle_call({count, Type, Conditions}, _From, State) ->
     {Adapter, Conn, _} = db_for_type(Type, State),
-    {reply, Adapter:count(Conn, Type, Conditions), State};
+%    {reply, Adapter:count(Conn, Type, Conditions), State};
+    process_adapter_call(Adapter:count(Conn, Type, Conditions), State);
 
 handle_call({counter, Counter}, _From, State) ->
     {Adapter, Conn, _} = db_for_counter(Counter, State),
-    {reply, Adapter:counter(Conn, Counter), State};
+%    {reply, Adapter:counter(Conn, Counter), State};
+    process_adapter_call(Adapter:counter(Conn, Counter), State);
 
 handle_call({incr, Key}, _From, State) ->
     {Adapter, _, Conn} = db_for_counter(Key, State),
-    {reply, Adapter:incr(Conn, Key), State};
+%    {reply, Adapter:incr(Conn, Key), State};
+     process_adapter_call(Adapter:incr(Conn, Key), State);
 
 handle_call({incr, Key, Count}, _From, State) ->
     {Adapter, _, Conn} = db_for_counter(Key, State),
-    {reply, Adapter:incr(Conn, Key, Count), State};
+%   {reply, Adapter:incr(Conn, Key, Count), State};
+    process_adapter_call(Adapter:incr(Conn, Key, Count), State);
 
 handle_call({delete, Id}, _From, State) ->
     {Adapter, _, Conn} = db_for_key(Id, State),
-    {reply, Adapter:delete(Conn, Id), State};
+   % {reply, Adapter:delete(Conn, Id), State};
+    process_adapter_call(Adapter:delete(Conn, Id), State);
 
 handle_call({save_record, Record}, _From, State) ->
     {Adapter, _, Conn} = db_for_record(Record, State),
-    {reply, Adapter:save_record(Conn, Record), State};
+%   {reply, Adapter:save_record(Conn, Record), State};
+    process_adapter_call(Adapter:save_record(Conn, Record), State);
 
 handle_call(push, _From, State) ->
     Adapter = State#state.adapter,
@@ -194,12 +207,14 @@ handle_call({table_exists, TableName}, _From, State) ->
 handle_call({execute, Commands}, _From, State) ->
     Adapter = State#state.adapter,
     Conn = State#state.write_connection,
-    {reply, Adapter:execute(Conn, Commands), State};
+%    {reply, Adapter:execute(Conn, Commands), State};
+    process_adapter_call(Adapter:execute(Conn, Commands), State);
 
 handle_call({execute, Commands, Params}, _From, State) ->
     Adapter = State#state.adapter,
     Conn = State#state.write_connection,
-    {reply, Adapter:execute(Conn, Commands, Params), State};
+%    {reply, Adapter:execute(Conn, Commands, Params), State};
+    process_adapter_call(Adapter:execute(Conn, Commands, Params), State);
 
 handle_call({transaction, TransactionFun}, _From, State) ->
     Adapter = State#state.adapter,
@@ -209,6 +224,12 @@ handle_call({transaction, TransactionFun}, _From, State) ->
 handle_call(state, _From, State) ->
     {reply, State, State}.
 
+process_adapter_call({reconnected_read, Res, NewConnection}, State) ->
+    {reply, Res, State#state{read_connection = NewConnection}};
+process_adapter_call({reconnected_write, Res, NewConnection}, State) ->
+    {reply, Res, State#state{write_connection = NewConnection}};
+process_adapter_call(Res, State) ->
+    {reply, Res, State}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 handle_cast({try_connect, Options}, State) when State#state.connection_state /= connected ->
@@ -273,11 +294,13 @@ handle_info(_Info, State) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 find_by_key(Key, From, Prefix, State, _CachedValue = undefined) ->
-    {reply, Res, _} = handle_call({find, Key}, From, State#state{ cache_enable = false }),
+%    {reply, Res, _} = handle_call({find, Key}, From, State#state{ cache_enable = false }),
+    {reply, Res, State2} = handle_call({find, Key}, From, State#state{ cache_enable = false }),
+    NewState = State2#state{ cache_enable = State#state.cache_enable },
     IsSuccess       = find_is_success(Res),
     case IsSuccess of
 	true ->
-	    boss_cache:set(Prefix, Key, Res, State#state.cache_ttl),
+	    boss_cache:set(Prefix, Key, Res, State2#state.cache_ttl),
 	    WatchString = lists:concat([Key, ", ", Key, ".*"]), 
 	    boss_news:set_watch(Key, WatchString, 
 				fun boss_db_cache:handle_record_news/3, 
@@ -287,7 +310,7 @@ find_by_key(Key, From, Prefix, State, _CachedValue = undefined) ->
 	    lager:error("Find in Cache by key error ~p ~p ", [Key, Res]),
 	    error 
     end,
-    {reply, Res, State};
+    {reply, Res, NewState};
 find_by_key(Key, _From, _Prefix, State, CachedValue) ->
     boss_news:extend_watch(Key),
     {reply, CachedValue, State}.
@@ -303,7 +326,9 @@ find_is_success(Res) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 find_list(Type, Include, Cmd, From, Prefix, State, Key) ->
-    {reply, Res, _} = handle_call(Cmd, From, State#state{cache_enable = false}),
+%    {reply, Res, _} = handle_call(Cmd, From, State#state{cache_enable = false}),
+     {reply, Res, State2} = handle_call(Cmd, From, State#state{cache_enable = false}),
+     NewState = State2#state{ cache_enable = State#state.cache_enable },
     case is_list(Res) of
         true ->
             DummyRecord		= boss_record_lib:dummy_record(Type),
@@ -320,7 +345,7 @@ find_list(Type, Include, Cmd, From, Prefix, State, Key) ->
 				{Prefix, Key}, State#state.cache_ttl);
         _ -> error % log it here?
     end,
-    Res.
+    {Res, NewState}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
