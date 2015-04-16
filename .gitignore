@@ -5,3 +5,4 @@ erl_crash.dump
 .project
 .settings
 /ebin
+.DS_Store
