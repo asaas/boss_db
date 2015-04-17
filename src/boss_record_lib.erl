@@ -116,18 +116,30 @@ ensure_loaded(Module) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 convert_value_to_type(Val, undefined) ->
     Val;
+convert_value_to_type(undefined, integer) ->
+    undefined;
 convert_value_to_type(Val, integer) when is_integer(Val) ->
     Val;
 convert_value_to_type(Val, integer) when is_list(Val) ->
     list_to_integer(Val);
 convert_value_to_type(Val, integer) when is_binary(Val) ->
     list_to_integer(binary_to_list(Val));
+convert_value_to_type(undefined, float) ->
+    undefined;
 convert_value_to_type(Val, float) when is_binary(Val) ->
     binary_to_float(Val);
 convert_value_to_type(Val, float) when is_float(Val) -> 
     Val;
 convert_value_to_type(Val, float) when is_integer(Val) -> 
     1.0 * Val;
+convert_value_to_type(Val, float) when is_binary(Val) ->
+    convert_value_to_type(binary_to_list(Val), float);
+convert_value_to_type(Val, float) when is_list(Val) ->
+    try
+        list_to_float(Val)
+    catch
+        error:badarg -> 1.0 * list_to_integer(Val)
+    end;
 convert_value_to_type(Val, string) when is_integer(Val) ->
     integer_to_list(Val);
 convert_value_to_type(Val, string) when is_binary(Val) ->
@@ -149,7 +161,7 @@ convert_value_to_type({{D1, D2, D3}, {T1, T2, T3}} = Val, integer) when is_integ
 convert_value_to_type({{D1, D2, D3}, {T1, T2, T3}} = Val, timestamp) when is_integer(D1), is_integer(D2), is_integer(D3), 
                                                                           is_integer(T1), is_integer(T2), is_integer(T3) ->
     Secs = calendar:datetime_to_gregorian_seconds(Val) - calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}),
-    {Secs rem ?MILLION, Secs div ?MILLION, 0};
+    {Secs div ?MILLION, Secs rem ?MILLION, 0};
 convert_value_to_type({{D1, D2, D3}, {T1, T2, T3}} = Val, datetime) when is_integer(D1), is_integer(D2), is_integer(D3), 
                                                                          is_integer(T1), is_integer(T2), is_integer(T3) ->
     Val;
@@ -157,6 +169,21 @@ convert_value_to_type({D1, D2, D3} = Val, date) when is_integer(D1), is_integer(
     Val;
 convert_value_to_type({date, {D1, D2, D3} = Val}, date) when is_integer(D1), is_integer(D2), is_integer(D3) ->
     Val;
+%% for use MongoDB
+%% add Ohira, Shuji at 2013-09-10
+convert_value_to_type({D1, D2, D3} = Val, timestamp) when is_integer(D1), is_integer(D2), is_integer(D3) ->
+    Val;
+convert_value_to_type(undefined, timestamp) ->
+    undefined;
+convert_value_to_type({D1, D2, D3} = Val, datetime) when is_integer(D1), is_integer(D2), is_integer(D3) ->
+    calendar:now_to_local_time(Val);
+convert_value_to_type(undefined, datetime) ->
+    undefined;
+convert_value_to_type(undefined, jdate) ->
+    undefined;
+convert_value_to_type({era, Era, year, Year, month, Month, day, Day} = Val, jdate) when is_integer(Era), is_integer(Year), is_integer(Month), is_integer(Day) ->
+    Val;
+convert_value_to_type(undefined,   boolean) -> undefined;
 convert_value_to_type(<<"1">>,     boolean) -> true;
 convert_value_to_type(<<"0">>,     boolean) -> false;
 convert_value_to_type(<<"true">>,  boolean) -> true;
