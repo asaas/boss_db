@@ -31,9 +31,9 @@ terminate(Conn) ->
 
 get(Conn, Prefix, Key) ->
     case eredis:q(Conn, ["GET", term_to_key(Prefix, Key)]) of
-        undefined ->
+        {ok, undefined} ->
             undefined;
-        Bin -> 
+        {ok, Bin} -> 
             binary_to_term(Bin)
     end.
 
