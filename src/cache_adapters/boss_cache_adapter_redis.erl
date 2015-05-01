@@ -38,8 +38,14 @@ get(Conn, Prefix, Key) ->
     end.
 
 set(Conn, Prefix, Key, Val, TTL) ->
-    {ok, Res} = eredis:q(Conn, ["SETEX", term_to_key(Prefix, Key), TTL, term_to_binary(Val)]),
-    Res.
+    case TTL of
+        0 ->
+            {ok, Res} = eredis:q(Conn, ["SET", term_to_key(Prefix, Key), term_to_binary(Val)]),
+            Res;
+        _ ->
+            {ok, Res} = eredis:q(Conn, ["SETEX", term_to_key(Prefix, Key), TTL, term_to_binary(Val)]),
+            Res
+    end.
 
 delete(Conn, Prefix, Key) ->
     eredis:q(Conn, ["DELETE", term_to_key(Prefix, Key)]).
